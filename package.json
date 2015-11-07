@@ -1,0 +1,31 @@
+{
+  "name": "punchy",
+  "version": "1.0.0",
+  "description": "Punchards for companies",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kotkarl/VEFT-Assignment10.git"
+  },
+  "author": "Hrafnkell Baldursson, Rannveig Gudmundsdottir",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/kotkarl/VEFT-Assignment10/issues"
+  },
+  "homepage": "https://github.com/kotkarl/VEFT-Assignment10#readme",
+  "dependencies": {
+    "body-parser": "^1.14.1",
+    "elasticsearch": "^9.0.0",
+    "express": "^4.13.3",
+    "lodash": "^3.10.1",
+    "mongodb": "^2.0.46",
+    "mongoose": "^4.1.11",
+    "node-uuid": "^1.4.3"
+  },
+  "devDependencies": {
+    "eslint": "^1.6.0"
+  }
+}
