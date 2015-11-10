@@ -5,15 +5,20 @@ const bodyParser = require('body-parser');
 const uuid = require('node-uuid');
 const _ = require('lodash');
 const models = require('./models');
+const elasticsearch = require('elasticsearch');
+const client = new elasticsearch.Client({
+  host: 'localhost:9200',
+  log: 'trace',
+});
 const app = express();
 
 const ADMIN_TOKEN = 'dabs';
 
-/* A small string for 401 messages. */
 const msg401 = 'You are unauthorized to add a company.';
 
-/* A small string for 404 messages. */
-const msg404 = 'Company not found';
+const msg404 = 'Company not found.';
+
+const msg409 = 'A company with the same title already exists.';
 
 /* HELPER FUNCTIONS */
 
@@ -96,28 +101,66 @@ app.post('/companies', bodyParser.json(), (req, res) => {
   if(!adminToken || adminToken !== ADMIN_TOKEN) {
     return res.status(401).send(msg401);
   }
-  // If content type in the request header is not application/json, the server responds with status code 415
-  if(contentType !== 'application/json') {
+  // If content type in the request header is not [aA]pplication/json, the server responds with status code 415
+  if(_.capitalize(contentType) !== 'Application/json') {
     return res.status(415).send('The \'content-type\' header must be \'application/json\'.');
   }
 
+  const company = req.body;
+
+  if(company.title === null) {
+    return res.status(412).send('Company title cannot be null.');
+  }
+
   // If a company with the same name exists, the server responds with status code 409
-
-  //TODO check if a company name exists
-
-  //TODO if preconditions are met then the company is written to mongodb and elasticsearch.
-
-  return res.send('ok');
-  /* const c = new models.Company(req.body);
-
-  c.save((err, company) => {
+  models.Company.findOne({'title': company.title}, (err, doc) => {
     if(err) {
-      return handleValidationError(err, res);
+      return res.status(500).send(err);
     }
-    // Return the company ID to the client
-    const companyId = {company_id: company._id};
-    res.status(201).json(companyId);
-});*/
+    if(doc) {
+      return res.status(409).send(msg409);
+    }
+
+    // If all is well, save into the database
+    const c = new models.Company(
+      {
+        title: company.title,
+        description: company.description || '',
+        url: company.url || '',
+        created: new Date(),
+      }
+    );
+
+    c.save((err, dbCompany) => {
+      if(err) {
+        return handleValidationError(err, res);
+      }
+
+      const companyId = dbCompany._id.toString();
+
+      // If the company is saved to the database, index it in ES
+      const data = {
+        title: dbCompany.title,
+        description: dbCompany.description,
+        url: dbCompany.url,
+        created: dbCompany.created,
+      };
+
+      const promise = client.index({
+        index: 'companies',
+        type: 'company',
+        id: companyId,
+        body: data,
+      });
+
+      promise.then((doc) => {
+        // Return the company ID to the client
+        res.status(201).json({id: companyId});
+      }, (err) => {
+        res.status(500).send(err);
+      });
+    });
+  });
 });
 
 /* Updates a preexisting company. */
