@@ -12,13 +12,18 @@ const client = new elasticsearch.Client({
 });
 const app = express();
 
+/* Helper constants  */
 const ADMIN_TOKEN = 'dabs';
 
-const msg401 = 'You are unauthorized to add a company.';
+const MSG401 = 'You are unauthorized to add a company.';
 
-const msg404 = 'Company not found.';
+const MSG404 = 'Company not found.';
 
-const msg409 = 'A company with the same title already exists.';
+const MSG409 = 'A company with the same title already exists.';
+
+/* Pagination defaults */
+const PAGE_DEFAULT_ENTRIES = 20;
+const PAGE_DEFAULT_START = 0;
 
 /* HELPER FUNCTIONS */
 
@@ -65,15 +70,52 @@ function companyRemoveUnwanted(companies) {
 
 /* Gets a list of all registered companies. */
 app.get('/companies', (req, res) => {
-  models.Company.find({}, (err, companies) => {
-    if(err) {
-      return res.status(500).send(err);
+  /* Get query parameters if there are any */
+  const page = req.query.page || PAGE_DEFAULT_START;
+  const max = req.query.max || PAGE_DEFAULT_ENTRIES;
+
+  /* Search with pagination and sort the list by
+     the titles of the companies alphabetically */
+  const promise = client.search({
+    'index': 'companies',
+    'type': 'company',
+    'size': max,
+    'from': page,
+    'body': {
+      'query': {
+        'match_all': {},
+      },
+      'sort': [
+        { 'title': {'order': 'asc'}},
+      ],
+    },
+  });
+
+  promise.then((docs) => {
+    /* Filter each company to display them correctly */
+    const mappedDocs = docs.hits.hits.map((d) => {
+      return {
+        id: d._id,
+        title: d._source.title,
+        description: d._source.description,
+        url: d._source.url,
+      };
+    });
+    res.send(mappedDocs);
+  }, (err) => {
+    /* If there are no companies created yet.
+      This is a workaround since elasticsearch returns
+      an 404 status code error if there are no companies
+      that have been created */
+    if(err.body.error.type === 'index_not_found_exception') {
+      return res.status(200).send([]);
     }
-    res.json(companyRemoveUnwanted(companies));
+    res.status(500).send(err);
   });
 });
 
-/* Gets a single company with the given id. */
+/* Gets a single company with the given id.
+    TODO finish this*/
 app.get('/companies/:id', (req, res) => {
   const id = req.params.id;
   validateId(id, (msg) => {
@@ -86,7 +128,7 @@ app.get('/companies/:id', (req, res) => {
       return res.status(500).send(err);
     }
     if(!company) {
-      return res.status(404).send(msg404);
+      return res.status(404).send(MSG404);
     }
     res.json(companyRemoveUnwanted([company]));
   });
@@ -99,7 +141,7 @@ app.post('/companies', bodyParser.json(), (req, res) => {
 
   // If ADMIN_TOKEN is missing or is incorrect, the server responds with status code 401
   if(!adminToken || adminToken !== ADMIN_TOKEN) {
-    return res.status(401).send(msg401);
+    return res.status(401).send(MSG401);
   }
   // If content type in the request header is not [aA]pplication/json, the server responds with status code 415
   if(_.capitalize(contentType) !== 'Application/json') {
@@ -118,7 +160,7 @@ app.post('/companies', bodyParser.json(), (req, res) => {
       return res.status(500).send(err);
     }
     if(doc) {
-      return res.status(409).send(msg409);
+      return res.status(409).send(MSG409);
     }
 
     // If all is well, save into the database
@@ -163,17 +205,20 @@ app.post('/companies', bodyParser.json(), (req, res) => {
   });
 });
 
-/* Updates a preexisting company. */
+/* Updates a preexisting company.
+    TODO finish this */
 app.post('/companies/:id', bodyParser.json(), (req, res) => {
   // Update a given company
 });
 
-/* Removes a previously added company. */
+/* Removes a previously added company.
+    TODO finish this */
 app.delete('/companies/:id', (req, res) => {
   // Remove a previously added company
 });
 
-/* Used to search for a given company that has been added to Punchy. */
+/* Used to search for a given company that has been added to Punchy.
+  TODO finish this */
 app.post('/companies/search', bodyParser.json(), (req, res) => {
   // Update a given company
 });
