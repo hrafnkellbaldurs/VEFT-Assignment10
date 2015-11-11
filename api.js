@@ -34,6 +34,9 @@ function handleValidationError(err, res) {
   _.forIn(err.errors, (val, key) => {
     msg = msg.concat(err.errors[key].message + '\n');
   });
+  msg = msg.concat('\nTo correctly register a company, you have to format the content like so:\n');
+  msg = msg.concat('\n{\n  \"title\": \"CompanyTitle\",\n  \"description\": \"This is a company\",\n');
+  msg = msg.concat('  \"url\": \"www.company.com\"\n}\n\nRequired fields are:\ntitle');
   return res.status(412).send(msg);
 }
 
@@ -114,23 +117,30 @@ app.get('/companies', (req, res) => {
   });
 });
 
-/* Gets a single company with the given id.
-    TODO finish this*/
+/* Gets a single company with the given id. */
 app.get('/companies/:id', (req, res) => {
   const id = req.params.id;
   validateId(id, (msg) => {
     if(msg) {
       return res.status(412).send(msg);
     }
-  });
-  models.Company.findOne({'_id': id}, (err, company) => {
-    if(err) {
-      return res.status(500).send(err);
-    }
-    if(!company) {
-      return res.status(404).send(MSG404);
-    }
-    res.json(companyRemoveUnwanted([company]));
+    models.Company.findOne({'_id': id}, (err, company) => {
+      if(err) {
+        if(err.name === 'CastError') {
+          return res.status(404).send(MSG404);
+        }
+        return res.status(500).send(err);
+      }
+      if(!company) {
+        return res.status(404).send(MSG404);
+      }
+      res.json({
+        id: company._id,
+        title: company.title,
+        description: company.description,
+        url: company.url,
+      });
+    });
   });
 });
 
