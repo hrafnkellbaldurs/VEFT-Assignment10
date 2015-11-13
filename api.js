@@ -4,7 +4,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const uuid = require('node-uuid');
 const _ = require('lodash');
-const models = require('./models');
+const Company = require('./models').Company;
 const elasticsearch = require('elasticsearch');
 const client = new elasticsearch.Client({
   host: 'localhost:9200',
@@ -54,7 +54,7 @@ function validateId(id, cb) {
 
 /* Finds the company with the given id and
     and returns it through the callback function.
-    If there is an error, it also gets sent through
+    If there is an error, it gets sent through
     the callback function. */
 function getCompanyById(id, res, cb) {
   validateId(id, (msg) => {
@@ -62,7 +62,7 @@ function getCompanyById(id, res, cb) {
       res.status(412);
       return cb(msg, res, null);
     }
-    models.Company.findOne({'_id': id}, (err, company) => {
+    Company.findOne({'_id': id}, (err, company) => {
       if(err) {
         if(err.name === 'CastError') {
           res.status(404);
@@ -80,34 +80,58 @@ function getCompanyById(id, res, cb) {
   });
 }
 
-/* Checks the ADMIN_TOKEN header and Content-Type
-    header for errors. Sends an error message to the
-    callback function if there is an error. */
-function checkHeaders(req, res, cb) {
+/* Checks the ADMIN_TOKEN header for errors and Content-Type
+    header if the request has content. Sends an error message
+    to the callback function if there is an error. */
+function checkHeaders(req, res, hasContent, cb) {
   const adminToken = req.headers.admin_token;
-  const contentType = req.headers['content-type'];
 
   // If ADMIN_TOKEN is missing or is incorrect, the server responds with status code 401
   if(!adminToken || adminToken !== ADMIN_TOKEN) {
     res.status(401);
     return cb(MSG401, res);
   }
-  // If content type in the request header is not [aA]pplication/json, the server responds with status code 415
-  if(_.capitalize(contentType) !== 'Application/json') {
-    res.status(415);
-    return cb('The \'content-type\' header must be \'[aA]pplication/json\'.', res);
-  }
+  if(hasContent) {
+    const contentType = req.headers['content-type'];
 
+    /* If content type in the request header is not [aA]pplication/json,
+    the server responds with status code 415 */
+    if(_.capitalize(contentType) !== 'Application/json') {
+      res.status(415);
+      return cb('The \'content-type\' header must be \'[aA]pplication/json\'.', res);
+    }
+  }
   return cb(null);
 }
 
-/* Returns a company with wanted variables */
-function excludeTitles(company) {
-  return {
-    title: company.title,
-    description: company.description,
-    url: company.url,
-  };
+/* Returns a company with wanted variables.
+   If the 'toString' boolean is true, the
+   function returns a string representing the
+   given company. If the 'withId' boolean is
+   true, the function returns the company
+   including the company id.*/
+function excludeTitles(company, toString, withId) {
+  if(!toString) {
+    if(!withId) {
+      return {
+        title: company.title,
+        description: company.description,
+        url: company.url,
+      };
+    }
+    return {
+      id: company._id,
+      title: company.title,
+      description: company.description,
+      url: company.url,
+    };
+  }
+  return '{\n' +
+         '  \"id\": \"' + company._id + '\",\n' +
+         '  \"title\": \"' + company.title + '\",\n' +
+         '  \"description\": \"' + company.description + '\",\n' +
+         '  \"url\": \"' + company.url + '\"\n' +
+         '}';
 }
 
 /* API METHODS */
@@ -165,21 +189,15 @@ app.get('/companies/:id', (req, res) => {
     if(err) {
       return resErr.send(err);
     }
-    const foundCompany = {
-      id: company._id,
-      title: company.title,
-      description: company.description,
-      url: company.url,
-    };
-    res.send(foundCompany);
+    res.json(excludeTitles(company, false, true));
   });
 });
 
 /* Registers a company. */
 app.post('/companies', bodyParser.json(), (req, res) => {
   /* Check if the user is authorized and has the
-      correct type of content */
-  checkHeaders(req, res, (err, resErr) => {
+      correct type of content. */
+  checkHeaders(req, res, true, (err, resErr) => {
 
     if(err) {
       return resErr.send(err);
@@ -188,8 +206,8 @@ app.post('/companies', bodyParser.json(), (req, res) => {
     const company = req.body;
 
     /* If a company with the same name exists,
-      the server responds with status code 409 */
-    models.Company.findOne({'title': company.title}, (err, doc) => {
+      the server responds with status code 409. */
+    Company.findOne({'title': company.title}, (err, doc) => {
       if(err) {
         return res.status(500).send(err);
       }
@@ -197,8 +215,8 @@ app.post('/companies', bodyParser.json(), (req, res) => {
         return res.status(409).send(MSG409);
       }
 
-      // If all is well, save into the database
-      const c = new models.Company(
+      // If all is well, save into the database.
+      const c = new Company(
         {
           title: company.title,
           description: company.description || '',
@@ -214,7 +232,7 @@ app.post('/companies', bodyParser.json(), (req, res) => {
 
         const companyId = dbCompany._id.toString();
 
-        // If the company is saved to the database, index it in ES
+        // If the company is saved to the database, index it in ES.
         const data = excludeTitles(dbCompany);
         data.created = dbCompany.created;
 
@@ -226,8 +244,8 @@ app.post('/companies', bodyParser.json(), (req, res) => {
         });
 
         promise.then((doc) => {
-          // Return the company ID to the client
-          res.status(201).json({id: companyId});
+          // Return the company ID to the client.
+          res.status(201).json({id: doc._id});
         }, (err) => {
           res.status(500).send(err);
         });
@@ -239,21 +257,23 @@ app.post('/companies', bodyParser.json(), (req, res) => {
 /* Updates a preexisting company. */
 app.post('/companies/:id', bodyParser.json(), (req, res) => {
   /* Check if the user is authorized and has the
-      correct type of content */
-  checkHeaders(req, res, (err, resErr) => {
+      correct type of content. */
+  checkHeaders(req, res, true, (err, resErr) => {
     if(err) {
       return resErr.send(err);
     }
 
-    // Check if the id matches with a registered company
+    // Check if the id matches with a registered company.
     const id = req.params.id;
     getCompanyById(id, res, (err, resErr, company) => {
       if(err) {
         return resErr.send(err);
       }
+      // Keep the original company for displaying later to the client.
+      const oldCompany = excludeTitles(company, true);
 
-      /* If it matches, update the company with the
-          updated information. */
+      /* If the ID matches, update the company with the
+          new information supplied by the client. */
       const newCompany = req.body;
       if(newCompany.title) {
         company.title = newCompany.title;
@@ -267,13 +287,13 @@ app.post('/companies/:id', bodyParser.json(), (req, res) => {
         company.url = newCompany.url;
       }
 
-      // Save the changes to the database
+      // Save the changes to the database.
       company.save((err, dbCompany) => {
         if(err) {
           return res.status(500).send(err);
         }
 
-        // If all is well, reindex ElasticSearch
+        // If all is well, reindex ElasticSearch.
         const promise = client.index({
           index: 'companies',
           type: 'company',
@@ -281,9 +301,11 @@ app.post('/companies/:id', bodyParser.json(), (req, res) => {
           body: excludeTitles(dbCompany),
         });
 
-        // Return the result to the client
-        promise.then((doc) => {
-          res.send('The company \'' + company.title + '\' has been successfully edited.');
+        // Return the result to the client.
+        promise.then(() => {
+          res.send('The following company has been successfully edited from:\n' +
+                    oldCompany + '\n\nTo:\n\n' +
+                    excludeTitles(company, true));
         }, (err) => {
           res.status(500).send(err);
         });
@@ -292,10 +314,47 @@ app.post('/companies/:id', bodyParser.json(), (req, res) => {
   });
 });
 
-/* Removes a previously added company.
-    TODO finish this */
+/* Removes a previously added company. */
 app.delete('/companies/:id', (req, res) => {
-  // Remove a previously added company
+  /* Check if the user is authorized. */
+  checkHeaders(req, res, false, (err, resErr) => {
+    if(err) {
+      return resErr.send(err);
+    }
+
+    /* If the user is authenticated, try to find and
+       delete the company. */
+    const id = req.params.id;
+    getCompanyById(id, res, (err, resErr, company) => {
+      // Return the corresponding error message is there is one.
+      if(err) {
+        return resErr.send(err);
+      }
+
+      // If the company exists, try to remove it.
+      company.remove((err) => {
+        if(err) {
+          return res.status(500).send(err);
+        }
+
+        /* If the company is successfully removed from
+           the database, also delete it from ElasticSearch. */
+        const promise = client.delete({
+          index: 'companies',
+          type: 'company',
+          id: id,
+        });
+
+        // Return the corresponding message to the client.
+        promise.then(() => {
+          res.send('The following company has been successfully removed:\n' +
+                   excludeTitles(company, true));
+        }, (error) => {
+          return res.status(500).send(error);
+        });
+      });
+    });
+  });
 });
 
 /* Used to search for a given company that has been added to Punchy.
