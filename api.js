@@ -134,6 +134,20 @@ function excludeTitles(company, toString, withId) {
          '}';
 }
 
+/* Maps each result from ElasticSearch to an
+    object containing the fields that we want. */
+function mapCompanyResults(results, cb) {
+  const mappedDocs = results.hits.hits.map((d) => {
+    return {
+      id: d._id,
+      title: d._source.title,
+      description: d._source.description,
+      url: d._source.url,
+    };
+  });
+  cb(mappedDocs);
+}
+
 /* API METHODS */
 
 /* Gets a list of all registered companies. */
@@ -161,15 +175,9 @@ app.get('/companies', (req, res) => {
 
   promise.then((docs) => {
     /* Filter each company to display them correctly */
-    const mappedDocs = docs.hits.hits.map((d) => {
-      return {
-        id: d._id,
-        title: d._source.title,
-        description: d._source.description,
-        url: d._source.url,
-      };
+    mapCompanyResults(docs, (companies) => {
+      res.send(companies);
     });
-    res.send(mappedDocs);
   }, (err) => {
     /* If there are no companies created yet.
       This is a workaround since elasticsearch returns
@@ -251,6 +259,43 @@ app.post('/companies', bodyParser.json(), (req, res) => {
         });
       });
     });
+  });
+});
+
+/* Used to search for a given company that has been added to Punchy. */
+app.post('/companies/search', bodyParser.json(), (req, res) => {
+  /* If the given JSON object doesn't contain a 'search' field,
+     return status code 412 to the client. */
+  const query = req.body.search;
+  if(!query) {
+    return res.status(412)
+    .send('The request body has to be of the following form:\n' +
+          '{ \"search\": \"String representing the search string\" }');
+  }
+
+  /* Search all fields with the query with ElasticSearch. */
+  const promise = client.search({
+    'index': 'companies',
+    'type': 'company',
+    'body': {
+      'query': {
+        'multi_match': {
+          'query': query,
+          'fields': ['title^2', 'description', 'url'],
+          'tie_breaker': 0.3,
+          'minimum_should_match': '30%',
+        },
+      },
+    },
+  });
+
+  /* Return the result to the client */
+  promise.then((docs) => {
+    mapCompanyResults(docs, (companies) => {
+      res.send(companies);
+    });
+  }, (err) => {
+    res.status(500).send(err);
   });
 });
 
@@ -355,12 +400,6 @@ app.delete('/companies/:id', (req, res) => {
       });
     });
   });
-});
-
-/* Used to search for a given company that has been added to Punchy.
-  TODO finish this */
-app.post('/companies/search', bodyParser.json(), (req, res) => {
-  // Update a given company
 });
 
 module.exports = app;
