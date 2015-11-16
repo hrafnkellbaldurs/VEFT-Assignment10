@@ -1,10 +1,10 @@
 # Punchy
 + **Prerequisites**
   - Have these programs installed on your device:
-  - MongoDB
-  - ElasticSearch
-  - Node
-  - NPM   
+    + MongoDB
+    + ElasticSearch
+    + Node
+    + NPM   
 + **How to run**
   - Install required packages with **npm install** in the root folder
   - Create a folder for the database named **db**
